@@ -1,0 +1,43 @@
+# Network IDS Lab — Suricata + target web app on the same Docker network.
+#
+# Live sniffing note: traffic from your host to published ports is handled by Docker's
+# proxy and may not appear inside the Suricata container's eth0 the way span/tap
+# traffic would. For full live inspection of host→container flows, run Suricata on
+# the host with -i lo0 (or your bridge) or use network_mode: host on Linux. PCAP
+# replay (suricata -r file.pcap) is the primary validation path in this repo.
+
+services:
+  target:
+    build:
+      context: ./target
+      dockerfile: Dockerfile
+    container_name: ids-lab-target
+    ports:
+      - "8080:80"
+    networks:
+      - ids-lab
+
+  suricata:
+    image: jasonish/suricata:7.0.3
+    container_name: ids-lab-suricata
+    depends_on:
+      - target
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+      - SYS_NICE
+    volumes:
+      - ../rules:/etc/suricata/rules:ro
+      - ./suricata/suricata.yaml:/etc/suricata/suricata.yaml:ro
+      - suricata-logs:/var/log/suricata
+    # Suricata stays up; you exec in to run suricata -r or live sniff on this iface.
+    command: ["sleep", "infinity"]
+    networks:
+      - ids-lab
+
+volumes:
+  suricata-logs:
+
+networks:
+  ids-lab:
+    driver: bridge

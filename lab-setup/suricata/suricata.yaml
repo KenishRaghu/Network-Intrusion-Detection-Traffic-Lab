@@ -1,0 +1,67 @@
+%YAML 1.1
+---
+# Minimal Suricata 7 config for this lab: load only custom hand-written rules and
+# emit EVE JSON for validation (validation/test_rules.py).
+#
+# When running on the host, point classification-file / reference-config-file at
+# your Suricata install, or run validation via Docker (see test_rules.py).
+
+default-log-dir: /var/log/suricata
+classification-file: /etc/suricata/classification.config
+reference-config-file: /etc/suricata/reference.config
+
+vars:
+  address-groups:
+    HOME_NET: "[192.168.0.0/16,10.0.0.0/8,172.16.0.0/12,127.0.0.0/8]"
+    EXTERNAL_NET: "any"
+
+default-rule-path: /etc/suricata/rules
+rule-files:
+  - tcp_rules.rules
+  - http_rules.rules
+  - dns_rules.rules
+  - tls_rules.rules
+
+outputs:
+  - eve-log:
+      enabled: yes
+      filetype: regular
+      filename: eve.json
+      types:
+        - alert:
+            tagged-packets: yes
+        - dns
+        - tls
+        - http
+        - flow
+
+app-layer:
+  protocols:
+    tls:
+      enabled: yes
+      ja3-fingerprints: yes
+      detection-ports:
+        dp: 443
+    dns:
+      tcp:
+        enabled: yes
+        detection-ports:
+          dp: 53
+      udp:
+        enabled: yes
+        detection-ports:
+          dp: 53
+    http:
+      enabled: yes
+
+threading:
+  set-cpu-affinity: no
+  detect-thread-ratio: 1.0
+
+# No live capture interface here: validation uses file mode (suricata -r).
+# Add af-packet/pcap sections from the stock suricata.yaml when you move to inline/tap.
+
+logging:
+  default-log-format: "[%i] %t - (%f:%l) <%d> (%n) -- "
+  default-output-filter: ""
+  outputs: []
