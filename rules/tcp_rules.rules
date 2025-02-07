@@ -1,0 +1,95 @@
+# =============================================================================
+# tcp_rules.rules — Hand-written Suricata/Snort-style signatures for TCP abuse.
+# SID block: 1000001–1000099 (lab namespace; not from ET/community feeds).
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# SID 1000001 | SYN flood / SYN spike from one source
+# What it detects: A single source opens many TCP connections to your inside
+#   hosts using bare SYN segments (typical SYN flood or aggressive connect scan).
+# Why it works: The `flags:S` match restricts to SYN-only packets, and Suricata's
+#   threshold counts events per source IP inside the time window.
+# False positives: Legitimate connection storms (REST microservices health checks,
+#   misconfigured clients retrying, or NAT pooling many users behind one IP).
+# -----------------------------------------------------------------------------
+alert tcp any any -> $HOME_NET any (
+    msg:"LAB TCP Possible SYN flood or SYN spike from single source";
+    flow:to_server;
+    flags:S;
+    threshold:type both, track by_src, count 80, seconds 3;
+    classtype:attempted-dos;
+    sid:1000001;
+    rev:1;
+)
+
+# -----------------------------------------------------------------------------
+# SID 1000002 | Horizontal port scan (many destination ports, SYN)
+# What it detects: One host probes many different TCP ports on inside assets in
+#   a short interval — classic horizontal scanning before exploitation.
+# Why it works: `track by_dst` increments per unique destination port for the
+#   source; crossing the count in the window indicates breadth, not depth.
+# False positives: Port brokers, some game/VoIP clients, or vulnerability
+#   scanners you intentionally run without an allow list.
+# -----------------------------------------------------------------------------
+alert tcp any any -> $HOME_NET any (
+    msg:"LAB TCP Possible SYN port scan (many destination ports)";
+    flow:to_server;
+    flags:S;
+    threshold:type both, track by_dst, count 18, seconds 4;
+    classtype:attempted-recon;
+    sid:1000002;
+    rev:1;
+)
+
+# -----------------------------------------------------------------------------
+# SID 1000003 | Christmas (XMAS) scan
+# What it detects: Packets with FIN+PSH+URG set and no SYN — classic XMAS probe.
+# Why it works: Normal TCP handshakes and bulk data rarely use this flag combo;
+#   stack fingerprinting tools emit it deliberately.
+# False positives: Broken middleboxes, custom embedded firmware, or corrupted
+#   packets on lossy links (rare but possible).
+# -----------------------------------------------------------------------------
+alert tcp any any -> $HOME_NET any (
+    msg:"LAB TCP XMAS scan style probe (FIN+PSH+URG)";
+    flow:to_server;
+    flags:FPU;
+    classtype:attempted-recon;
+    sid:1000003;
+    rev:1;
+)
+
+# -----------------------------------------------------------------------------
+# SID 1000004 | NULL scan
+# What it detects: TCP segments toward inside hosts with no TCP flags set.
+# Why it works: Legitimate stacks almost never emit NULL-flag packets to open
+#   services; scanners use them for OS fingerprinting.
+# False positives: Some tunneling or encapsulation gear has produced odd flag
+#   combinations in the wild; verify with payload context in Wireshark.
+# -----------------------------------------------------------------------------
+alert tcp any any -> $HOME_NET any (
+    msg:"LAB TCP NULL scan style probe (no TCP flags)";
+    flow:to_server;
+    flags:0;
+    classtype:attempted-recon;
+    sid:1000004;
+    rev:1;
+)
+
+# -----------------------------------------------------------------------------
+# SID 1000005 | FIN scan
+# What it detects: Many bare FIN segments toward different inside ports from one
+#   source — consistent with FIN-style horizontal probing.
+# Why it works: A threshold on FIN+to_server reduces noise from single teardowns
+#   while still surfacing scan-like breadth.
+# False positives: Load balancers or proxies that reset many half-open flows in
+#   a burst; tune count/seconds or add flowbits if you terminate TLS on edge.
+# -----------------------------------------------------------------------------
+alert tcp any any -> $HOME_NET any (
+    msg:"LAB TCP FIN scan style probe (many FINs to many ports)";
+    flow:to_server;
+    flags:F;
+    threshold:type both, track by_dst, count 14, seconds 4;
+    classtype:attempted-recon;
+    sid:1000005;
+    rev:1;
+)

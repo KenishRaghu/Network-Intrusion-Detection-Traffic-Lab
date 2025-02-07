@@ -1,0 +1,97 @@
+# =============================================================================
+# dns_rules.rules — DNS abuse and exfil-style patterns (hand-written lab SIDs).
+# SID block: 1000200–1000299
+# Note: Suricata 8+ adds `dns.rrtype`; this set stays compatible with 7.x using
+#       payload and `dns.query` patterns where type-specific keywords are absent.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# SID 1000201 | Long DNS query name (possible tunneling / exfil staging)
+# What it detects: Unusually long query names, often used to smuggle data in
+#   labels before entropy encoding or to probe resolver limits.
+# Why it works: The `dns.query` buffer holds the dotted name; a length-style
+#   PCRE approximates "more than N characters" without external scripts.
+# False positives: Some CDN edge keys, email security TXT staging, or ACME
+#   DNS-01 challenges can produce legitimately long names — tune the threshold.
+# -----------------------------------------------------------------------------
+alert dns any any -> any any (
+    msg:"LAB DNS Very long query name (possible tunneling)";
+    dns.query;
+    pcre:"/^.{96,}$/";
+    classtype:policy-violation;
+    sid:1000201;
+    rev:1;
+)
+
+# -----------------------------------------------------------------------------
+# SID 1000202 | High volume of queries for TXT-heavy lab zone
+# What it detects: Many queries involving a dedicated TXT-exfil test zone label
+#   from one source in a short interval (simulates TXT staging to one domain).
+# Why it works: Thresholding on a distinctive suffix keeps the rule anchored to
+#   the lab traffic shape; raise counts in production or switch to `dns.rrtype`
+#   when you upgrade Suricata.
+# False positives: Any legitimate automation that hammers the same internal
+#   zone suffix during misconfigured retries.
+# -----------------------------------------------------------------------------
+alert dns any any -> any any (
+    msg:"LAB DNS High query rate to TXT exfil test zone (threshold)";
+    dns.query;
+    content:".txt-exfil.lab.invalid";
+    nocase;
+    threshold:type both, track by_src, count 28, seconds 6;
+    classtype:policy-violation;
+    sid:1000202;
+    rev:1;
+)
+
+# -----------------------------------------------------------------------------
+# SID 1000203 | Zone transfer attempt (AXFR wire pattern for lab QNAME x.lab)
+# What it detects: DNS messages asking for type AXFR (252) against the fixed
+#   question name `x.lab` used by `attacks/dns_attacks.py`.
+# Why it works: On Suricata 7 without `dns.rrtype`, matching the concatenation of
+#   the wire-encoded QNAME and QTYPE/QCLASS is reliable for this simulator. For
+#   arbitrary QNAMEs in production, prefer `dns.rrtype:252;` on Suricata 8+.
+# False positives: None in normal recursive client traffic unless you literally
+#   emit the same bytes; accidental collision is astronomically unlikely.
+# -----------------------------------------------------------------------------
+alert udp any any -> any 53 (
+    msg:"LAB DNS AXFR query pattern (synthetic x.lab in UDP/53)";
+    content:"|01 78 03 6c 61 62 00 00 fc 00 01|";
+    classtype:attempted-recon;
+    sid:1000203;
+    rev:1;
+)
+
+# -----------------------------------------------------------------------------
+# SID 1000204 | Lookup of placeholder “known-bad” domain
+# What it detects: Resolution attempts for an obviously placeholder malicious
+#   FQDN carried in this repo for demonstration (not a live IOC list).
+# Why it works: `dns.query` matches the normalized dotted string Suricata
+#   extracts from the question section.
+# False positives: None unless you deliberately create that zone internally or
+#   typo a legitimate name into the same string.
+# -----------------------------------------------------------------------------
+alert dns any any -> any any (
+    msg:"LAB DNS Query to placeholder malicious domain (IOC example)";
+    dns.query;
+    content:"malware_dropper.placeholder.invalid";
+    nocase;
+    classtype:trojan-activity;
+    sid:1000204;
+    rev:1;
+)
+
+# -----------------------------------------------------------------------------
+# SID 1000205 | DNS over TCP with AXFR pattern (same bytes, length-prefixed)
+# What it detects: AXFR-style query carried over DNS-over-TCP used in the lab.
+# Why it works: Searches the TCP payload for the same distinctive byte run; the
+#   two-byte DNS-over-TCP length field precedes it in our generator (0x0016).
+# False positives: Same as 1000203 — extremely low outside the simulator.
+# -----------------------------------------------------------------------------
+alert tcp any any -> any 53 (
+    msg:"LAB DNS AXFR-style query over TCP/53 (synthetic)";
+    content:"|01 78 03 6c 61 62 00 00 fc 00 01|";
+    classtype:attempted-recon;
+    sid:1000205;
+    rev:1;
+)

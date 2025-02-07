@@ -1,0 +1,276 @@
+# =============================================================================
+# http_rules.rules — HTTP request/response abuse (hand-written lab SIDs).
+# SID block: 1000100–1000199
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# SID 1000101 | SQLi — UNION-based pattern in URI
+# What it detects: Classic UNION SELECT style injection attempts in the URL.
+# Why it works: `http.uri` limits inspection to the path/query buffer; `nocase`
+#   catches mixed-case evasion that still uses the same token sequence.
+# False positives: Security blogs, WAF documentation sites, or encoded content
+#   that happens to contain the substring in benign query parameters.
+# -----------------------------------------------------------------------------
+alert http any any -> $HOME_NET any (
+    msg:"LAB HTTP Possible SQL injection (UNION SELECT) in URI";
+    flow:established,to_server;
+    http.uri;
+    content:"union";
+    nocase;
+    content:"select";
+    nocase;
+    distance:0;
+    within:64;
+    classtype:web-application-attack;
+    sid:1000101;
+    rev:1;
+)
+
+# -----------------------------------------------------------------------------
+# SID 1000102 | SQLi — tautology OR 1=1 in URI
+# What it detects: Boolean tautology probes such as OR 1=1 in GET parameters.
+# Why it works: Matches literal numeric tautology strings common in automated
+#   scanners; kept short to reduce cost (`depth` caps inspection).
+# False positives: Math or programming tutorials mirrored on intranet wikis, or
+#   API docs with example query strings containing similar text.
+# -----------------------------------------------------------------------------
+alert http any any -> $HOME_NET any (
+    msg:"LAB HTTP Possible SQL injection (OR 1=1 style) in URI";
+    flow:established,to_server;
+    http.uri;
+    content:"or 1=1";
+    nocase;
+    depth:512;
+    classtype:web-application-attack;
+    sid:1000102;
+    rev:1;
+)
+
+# -----------------------------------------------------------------------------
+# SID 1000103 | SQLi — quoted OR fragment (auth bypass style)
+# What it detects: Login-style tautology fragments such as '+or+' embedded in a
+#   parameter (URL-encoded quotes are normalized into the URI buffer by Suricata).
+# Why it works: Literal `'+or+'` is rare in benign REST paths yet common in canned
+#   SQLi tutorials and automated login bypass tools.
+# False positives: OData filters, search boxes with apostrophes, or JSON APIs
+#   that embed quoted OR expressions in parameters.
+# -----------------------------------------------------------------------------
+alert http any any -> $HOME_NET any (
+    msg:"LAB HTTP Possible SQL injection (quoted OR fragment) in URI";
+    flow:established,to_server;
+    http.uri;
+    content:"'+or+'";
+    nocase;
+    classtype:web-application-attack;
+    sid:1000103;
+    rev:1;
+)
+
+# -----------------------------------------------------------------------------
+# SID 1000104 | SQLi — UNION near inline comment (stacked / truncation style)
+# What it detects: UNION keyword co-occurring with `--` in the same URI, a combo
+#   seen when attackers terminate the original query before appending a union.
+# Why it works: Benign URLs rarely contain both tokens within a short window;
+#   `within` caps how far apart they may be in the buffer.
+# False positives: Technical articles mirrored into search parameters, or WAF
+#   learning pages that echo both tokens in one query string.
+# -----------------------------------------------------------------------------
+alert http any any -> $HOME_NET any (
+    msg:"LAB HTTP Possible SQL injection (UNION with SQL line comment) in URI";
+    flow:established,to_server;
+    http.uri;
+    content:"union";
+    nocase;
+    content:"--";
+    within:96;
+    classtype:web-application-attack;
+    sid:1000104;
+    rev:1;
+)
+
+# -----------------------------------------------------------------------------
+# SID 1000105 | XSS — script tag open in URI
+# What it detects: Reflected XSS probes that embed HTML script tags in requests.
+# Why it works: `<script` in the URI is uncommon for normal REST/JSON traffic.
+# False positives: XSS cheat-sheet repositories, security training pages, or
+#   WAF challenge URLs that intentionally echo markers.
+# -----------------------------------------------------------------------------
+alert http any any -> $HOME_NET any (
+    msg:"LAB HTTP Possible XSS (<script) in URI";
+    flow:established,to_server;
+    http.uri;
+    content:"<script";
+    nocase;
+    fast_pattern;
+    classtype:web-application-attack;
+    sid:1000105;
+    rev:1;
+)
+
+# -----------------------------------------------------------------------------
+# SID 1000106 | XSS — javascript: pseudo-protocol in URI
+# What it detects: Attempts to execute code via javascript: URLs in parameters.
+# Why it works: Matches the literal scheme prefix inside the URI buffer.
+# False positives: Documentation about safe URL handling, or CMS content that
+#   discusses javascript: in text fields mirrored into logs (rare in URI).
+# -----------------------------------------------------------------------------
+alert http any any -> $HOME_NET any (
+    msg:"LAB HTTP Possible XSS (javascript: scheme) in URI";
+    flow:established,to_server;
+    http.uri;
+    content:"javascript:";
+    nocase;
+    classtype:web-application-attack;
+    sid:1000106;
+    rev:1;
+)
+
+# -----------------------------------------------------------------------------
+# SID 1000107 | XSS — event handler injection in URI
+# What it detects: Event-handler attributes such as onerror= used in payloads.
+# Why it works: Many HTMLi scanners template onerror/onload in query strings.
+# False positives: Frontend frameworks or analytics query parameters that use
+#   "onerror" as a benign key name (uncommon but possible).
+# -----------------------------------------------------------------------------
+alert http any any -> $HOME_NET any (
+    msg:"LAB HTTP Possible XSS (onerror= handler) in URI";
+    flow:established,to_server;
+    http.uri;
+    content:"onerror=";
+    nocase;
+    classtype:web-application-attack;
+    sid:1000107;
+    rev:1;
+)
+
+# -----------------------------------------------------------------------------
+# SID 1000108 | Directory traversal — dot-dot-slash in URI
+# What it detects: Path traversal sequences in HTTP requests.
+# Why it works: `../` is a high-signal token in application layer paths.
+# False positives: Some static file servers or docs that explain traversal in
+#   the URL path itself; also certain encoded filenames if decoded upstream.
+# -----------------------------------------------------------------------------
+alert http any any -> $HOME_NET any (
+    msg:"LAB HTTP Directory traversal attempt (../ in URI)";
+    flow:established,to_server;
+    http.uri;
+    content:"../";
+    classtype:web-application-attack;
+    sid:1000108;
+    rev:1;
+)
+
+# -----------------------------------------------------------------------------
+# SID 1000109 | Directory traversal — encoded slash variants
+# What it detects: URL-encoded traversal (`..%2f`, `%2e%2e/`) in the URI.
+# Why it works: Attackers encode slashes to slip past naive path normalizers.
+# False positives: Binary-safe parameters that coincidentally embed the hex
+#   sequence without semantic traversal intent.
+# -----------------------------------------------------------------------------
+alert http any any -> $HOME_NET any (
+    msg:"LAB HTTP Encoded directory traversal in URI";
+    flow:established,to_server;
+    http.uri;
+    content:"..%2f";
+    nocase;
+    classtype:web-application-attack;
+    sid:1000109;
+    rev:1;
+)
+
+# -----------------------------------------------------------------------------
+# SID 1000110 | Offensive tooling — sqlmap default User-Agent
+# What it detects: sqlmap's default or well-known User-Agent substrings.
+# Why it works: Many operators forget `-A`; the UA is trivial to spoof but is
+#   still a useful automation breadcrumb on internal pen tests you control.
+# False positives: Blue-team decoys, honeypots, or red-team exercise traffic
+#   intentionally mimicking sqlmap without being an actual attack.
+# -----------------------------------------------------------------------------
+alert http any any -> $HOME_NET any (
+    msg:"LAB HTTP Suspicious User-Agent (sqlmap)";
+    flow:established,to_server;
+    http.user_agent;
+    content:"sqlmap";
+    nocase;
+    classtype:trojan-activity;
+    sid:1000110;
+    rev:1;
+)
+
+# -----------------------------------------------------------------------------
+# SID 1000111 | Offensive tooling — Nikto User-Agent
+# What it detects: Nikto scanner User-Agent strings.
+# Why it works: Nikto advertises itself in UA by default.
+# False positives: Vulnerability management appliances replaying Nikto patterns.
+# -----------------------------------------------------------------------------
+alert http any any -> $HOME_NET any (
+    msg:"LAB HTTP Suspicious User-Agent (Nikto)";
+    flow:established,to_server;
+    http.user_agent;
+    content:"Nikto";
+    nocase;
+    classtype:attempted-recon;
+    sid:1000111;
+    rev:1;
+)
+
+# -----------------------------------------------------------------------------
+# SID 1000112 | Offensive tooling — gobuster User-Agent
+# What it detects: gobuster's default User-Agent (short, distinctive).
+# Why it works: Brute-force directory tools often use a constant UA per release.
+# False positives: Custom tools that reuse the same string, or copy/paste UA
+#   lists in integration tests.
+# -----------------------------------------------------------------------------
+alert http any any -> $HOME_NET any (
+    msg:"LAB HTTP Suspicious User-Agent (gobuster)";
+    flow:established,to_server;
+    http.user_agent;
+    content:"gobuster";
+    nocase;
+    classtype:attempted-recon;
+    sid:1000112;
+    rev:1;
+)
+
+# -----------------------------------------------------------------------------
+# SID 1000113 | HTTP response anomaly — burst of 403 to one client
+# What it detects: Many HTTP 403 responses directed at the same client in a
+#   short interval (forced browsing, ACL probing, or auth brute force fallout).
+# Why it works: `flow:from_server` scopes to responses; threshold tracks volume
+#   per destination (the client receiving the denials).
+# False positives: CDN edge blocks during DDoS, geo-fencing, or misconfigured
+#   SSO that returns 403 for every asset until login completes.
+# -----------------------------------------------------------------------------
+alert http any any -> $HOME_NET any (
+    msg:"LAB HTTP Many 403 responses to single client (possible brute forcing)";
+    flow:established,from_server;
+    http.stat_code;
+    content:"403";
+    threshold:type both, track by_dst, count 22, seconds 8;
+    classtype:attempted-recon;
+    sid:1000113;
+    rev:1;
+)
+
+# -----------------------------------------------------------------------------
+# SID 1000114 | SQLi patterns in HTTP POST body (selected payloads)
+# What it detects: UNION / OR 1=1 style strings in uploaded form bodies.
+# Why it works: `http.request_body` (alias http_client_body) inspects entity
+#   bodies where blind SQLi often moves when WAFs harden query strings.
+# False positives: Ticket systems or CRM imports that paste security writeups
+#   containing the same literals into description fields.
+# -----------------------------------------------------------------------------
+alert http any any -> $HOME_NET any (
+    msg:"LAB HTTP Possible SQL injection pattern in POST body";
+    flow:established,to_server;
+    http.request_body;
+    content:"union";
+    nocase;
+    content:"select";
+    nocase;
+    distance:0;
+    within:96;
+    classtype:web-application-attack;
+    sid:1000114;
+    rev:1;
+)

@@ -1,0 +1,137 @@
+# =============================================================================
+# tls_rules.rules — TLS visibility without decryption (hand-written lab SIDs).
+# SID block: 1000300–1000399
+# Requires: app-layer.protocols.tls.ja3-fingerprints: yes (see suricata.yaml).
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# SID 1000301 | Expired server certificate presented to the client
+# What it detects: Server certificate validity window is past `notAfter`.
+# Why it works: Suricata parses the cert chain from the handshake and evaluates
+#   dates without needing plaintext application data.
+# False positives: Misconfigured internal PKI, long-lived IoT devices, or clients
+#   that intentionally connect to retired staging hosts during migrations.
+# Note: Synthetic ClientHello-only PCAPs in this repo do not carry certificates;
+#   replay a capture that includes ServerHello+Certificate to exercise this SID.
+# -----------------------------------------------------------------------------
+alert tls any any -> $HOME_NET any (
+    msg:"LAB TLS Server certificate is expired";
+    flow:established,from_server;
+    tls_cert_expired;
+    classtype:protocol-command-decode;
+    sid:1000301;
+    rev:1;
+)
+
+# -----------------------------------------------------------------------------
+# SID 1000302 | Self-signed style issuer (lab string match)
+# What it detects: Issuer DN contains the lab-only token `O=IDS-Lab-SelfSigned`,
+#   which we embed when generating optional demo PEM material (see tuning notes).
+# Why it works: Without full chain validation, matching a known self-signing
+#   organization string is coarse but explainable in interviews.
+# False positives: None unless you reuse the same fake org name in production.
+# -----------------------------------------------------------------------------
+alert tls any any -> $HOME_NET any (
+    msg:"LAB TLS Certificate issuer matches self-signed demo profile";
+    flow:established,from_server;
+    tls.cert_issuer;
+    content:"O=IDS-Lab-SelfSigned";
+    nocase;
+    classtype:policy-violation;
+    sid:1000302;
+    rev:1;
+)
+
+# -----------------------------------------------------------------------------
+# SID 1000303 | JA3 — deterministic lab ClientHello (this repository)
+# What it detects: The MD5 JA3 of the fixed ClientHello built in
+#   attacks/tls_lab_clienthello.py (cipher/extension order locked).
+# Why it works: JA3 summarizes ClientHello features; locking the builder makes
+#   the fingerprint stable for automated validation.
+# False positives: None unless another tool emits an identical ClientHello (very
+#   unlikely). If Suricata and the Python JA3 reference ever diverge, recompute
+#   with `python -c "from attacks.tls_lab_clienthello import lab_ja3_string_and_md5; print(lab_ja3_string_and_md5())"`.
+# -----------------------------------------------------------------------------
+alert tls any any -> any any (
+    msg:"LAB TLS JA3 matches synthetic lab ClientHello";
+    ja3.hash;
+    content:"4e6327d6b4b699766c1250b3356cfde4";
+    classtype:trojan-activity;
+    sid:1000303;
+    rev:1;
+)
+
+# -----------------------------------------------------------------------------
+# SID 1000304 | JA3 example — sqlmap / urllib family (illustrative hash)
+# What it detects: A published JA3 MD5 that has been widely cited for **sqlmap**
+#   on older Linux/OpenSSL stacks. Real deployments change with Python, OpenSSL,
+#   and sqlmap updates — treat as a template, not gospel.
+# Why it works: Same JA3 mechanics as 1000303; you swap in hashes from PCAPs or
+#   JA3DB for your estate.
+# False positives: Any benign client that happens to share the same JA3 (common
+#   when multiple tools statically link similar OpenSSL builds).
+# -----------------------------------------------------------------------------
+alert tls any any -> any any (
+    msg:"LAB TLS JA3 matches illustrative sqlmap-era fingerprint (verify in your env)";
+    ja3.hash;
+    content:"e7eca2baf4458d095b7f45da28c16c34";
+    classtype:trojan-activity;
+    sid:1000304;
+    rev:1;
+)
+
+# -----------------------------------------------------------------------------
+# SID 1000305 | JA3 example — Metasploit reverse_https family (illustrative)
+# What it detects: Example hash sometimes seen in **Metasploit** Meterpreter
+#   reverse_https discussions; versions and Ruby/OpenSSL pairs rotate quickly.
+# Why it works: Demonstrates how you would bolt threat-intel JA3 atoms onto the
+#   same Suricata keyword set used for the lab synthetic print.
+# False positives: Shared libraries and overlapping JA3 collisions; always pair
+#   with SNI, URI, or host context before blocking.
+# -----------------------------------------------------------------------------
+alert tls any any -> any any (
+    msg:"LAB TLS JA3 matches illustrative Metasploit reverse_https fingerprint";
+    ja3.hash;
+    content:"6734f37431670b3b4302d09373793d";
+    classtype:trojan-activity;
+    sid:1000305;
+    rev:1;
+)
+
+# -----------------------------------------------------------------------------
+# SID 1000306 | SNI matches placeholder C2-style hostname
+# What it detects: ClientHello SNI set to `malware-c2.placeholder.invalid`, which
+#   the PCAP builder emits on purpose.
+# Why it works: SNI is visible in cleartext during the handshake; no keys needed.
+# False positives: None unless an internal app literally requests that hostname.
+# -----------------------------------------------------------------------------
+alert tls any any -> any any (
+    msg:"LAB TLS SNI matches placeholder malicious hostname";
+    tls.sni;
+    content:"malware-c2.placeholder.invalid";
+    nocase;
+    classtype:trojan-activity;
+    sid:1000306;
+    rev:1;
+)
+
+# -----------------------------------------------------------------------------
+# SID 1000307 | JA3S example — Cobalt Strike–like team-server fingerprint (illustrative)
+# What it detects: **JA3S** (server side of the handshake) using a hash that has
+#   appeared in public write-ups of Cobalt Strike–style TLS stacks. Rotate per
+#   campaign; adversaries recompile constantly.
+# Why it works: `ja3s.hash` mirrors JA3 but for ServerHello selection ordering.
+# False positives: Collisions with benign servers that ship the same JA3S due to
+#   identical OpenSSL defaults.
+# Note: Default lab PCAPs may not include ServerHello; this rule documents how you
+#   would load server-side intel once you have representative PCAPs.
+# -----------------------------------------------------------------------------
+alert tls any any -> $HOME_NET any (
+    msg:"LAB TLS JA3S matches illustrative Cobalt Strike–class server print";
+    flow:established,from_server;
+    ja3s.hash;
+    content:"a95c01fd7f05fce11a2a852d7b0dc186";
+    classtype:trojan-activity;
+    sid:1000307;
+    rev:1;
+)
