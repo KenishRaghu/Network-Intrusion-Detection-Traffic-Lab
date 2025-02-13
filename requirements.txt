@@ -1,0 +1,4 @@
+# PCAP generation + JA3 helpers (validation uses Suricata or Docker, not Python)
+scapy>=2.5.0
+requests>=2.28.0
+dpkt>=1.9.8
