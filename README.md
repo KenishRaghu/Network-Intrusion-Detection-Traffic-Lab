@@ -5,7 +5,7 @@ Hands-on portfolio work focused on **writing, testing, tuning, and proving** IDS
 ## What this demonstrates
 
 1. **Custom detection** across TCP, HTTP, DNS, and TLS metadata (JA3, SNI, certificate keywords).
-2. **Attack simulation** with Scapy and Python that maps **one-to-one** to rule SIDs (traceability for interviews).
+2. **Attack simulation** with Scapy and Python that maps **one-to-one** to rule SIDs
 3. **PCAP replay validation** — the same workflow as production tuning: generate traffic → capture or synthesize PCAPs → `suricata -r` → inspect EVE JSON.
 4. **Accuracy story** — `validation/test_rules.py` checks **true positives** (expected SIDs fire on attack PCAPs) and **false positives** (baseline PCAP stays silent).
 
